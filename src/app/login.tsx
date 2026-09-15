@@ -1,13 +1,13 @@
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
 import {
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 const API_BASE_URL = 'http://119.59.102.161:3085/api';
@@ -29,97 +29,38 @@ export default function LoginScreen() {
     try {
       const cleanUsername = username.trim().toLowerCase();
 
-      // 1. Check Admin Account
-      if (cleanUsername === 'admin') {
-        if (password === '1234') {
-          if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            localStorage.setItem('user_role', 'admin');
-          }
-          setToastMessage('Login Success !');
-          setTimeout(() => {
-            setToastMessage('');
-            router.replace('/');
-          }, 1000);
-          return;
-        } else {
-          setToastMessage('Incorrect password');
-          setTimeout(() => setToastMessage(''), 2500);
-          setLoading(false);
-          return;
-        }
-      }
-
-      // 2. Bypass for 'spy' to ensure smooth login access
-      if (cleanUsername === 'spy') {
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          localStorage.setItem('user_role', 'user');
-        }
-        setToastMessage('Login Success !');
-        setTimeout(() => {
-          setToastMessage('');
-          router.replace('/');
-        }, 1000);
-        return;
-      }
-
-      // 3. Check LocalStorage
-      let localUsers = [];
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        localUsers = JSON.parse(localStorage.getItem('registered_users') || '[]');
-      }
-
-      const foundLocalUser = localUsers.find(
-        (u: any) => u.username?.toLowerCase() === cleanUsername
-      );
-
-      if (foundLocalUser) {
-        if (String(foundLocalUser.password) === password.trim()) {
-          if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            localStorage.setItem('user_role', foundLocalUser.role || 'user');
-          }
-          setToastMessage('Login Success !');
-          setTimeout(() => {
-            setToastMessage('');
-            router.replace('/');
-          }, 1000);
-          return;
-        } else {
-          setToastMessage('Incorrect password');
-          setTimeout(() => setToastMessage(''), 2500);
-          setLoading(false);
-          return;
-        }
-      }
-
-      // 4. Check Server API
+      // ดึงข้อมูลผู้ใช้ทั้งหมดจาก Server API (ที่เชื่อมกับ MySQL/phpMyAdmin)
       const response = await fetch(`${API_BASE_URL}/users`);
       const data = await response.json();
 
       if (!Array.isArray(data)) {
-        setToastMessage('User not found');
+        setToastMessage('Cannot connect to database users');
         setTimeout(() => setToastMessage(''), 2500);
         setLoading(false);
         return;
       }
 
-      const foundServerUser = data.find(
+      // ค้นหา User ในฐานข้อมูล
+      const foundUser = data.find(
         (u: any) => u.username?.toLowerCase() === cleanUsername
       );
 
-      if (!foundServerUser) {
+      if (!foundUser) {
         setToastMessage('User not found');
         setTimeout(() => setToastMessage(''), 2500);
         setLoading(false);
         return;
       }
 
-      const validPassword = foundServerUser.password ?? foundServerUser.pass ?? foundServerUser.pwd;
+      // ตรวจสอบรหัสผ่าน (รองรับฟิลด์ password หรือ pwd)
+      const validPassword = foundUser.password ?? foundUser.pass ?? foundUser.pwd;
 
       if (validPassword !== undefined && String(validPassword) === password.trim()) {
         if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          localStorage.setItem('user_role', foundServerUser.role || 'user');
+          localStorage.setItem('user_role', foundUser.role || 'user');
+          localStorage.setItem('username', foundUser.username);
         }
-        setToastMessage('Login Successful');
+        setToastMessage('Login Successful !');
         setTimeout(() => {
           setToastMessage('');
           router.replace('/');

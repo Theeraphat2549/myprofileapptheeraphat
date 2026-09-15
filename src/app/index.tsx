@@ -151,15 +151,25 @@ export default function HomeScreen() {
     setProducts(clustered);
   };
 
-  const handleAddToCart = (product: Product) => {
+ const handleAddToCart = (product: Product) => {
     try {
       if (typeof window !== 'undefined') {
         const existingCart = localStorage.getItem('user_cart');
         let cart = existingCart ? JSON.parse(existingCart) : [];
 
-        const index = cart.findIndex((item: any) => item.id === product.id);
+        // เปลี่ยนมาเช็คจากชื่อสินค้า (name) แทน id เพื่อป้องกันปัญหาตอน id ในฐานข้อมูลเปลี่ยน
+        const index = cart.findIndex((item: any) => item.name?.trim().toLowerCase() === product.name?.trim().toLowerCase());
+        
         if (index > -1) {
-          cart[index].quantity += 1;
+          // อัปเดตข้อมูลล่าสุด ทั้ง id ใหม่, ชื่อ, ราคา และรูปภาพใหม่ ทับลงไปทันที
+          cart[index] = {
+            ...cart[index],
+            id: product.id,
+            name: product.name,
+            price: product.price,
+            image: product.image,
+            quantity: (cart[index].quantity || 1) + 1
+          };
         } else {
           cart.push({ ...product, quantity: 1 });
         }

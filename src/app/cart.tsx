@@ -1,15 +1,15 @@
 import { Stack, router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    FlatList,
-    Image,
-    Modal,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  FlatList,
+  Image,
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 interface CartItem {
@@ -20,6 +20,8 @@ interface CartItem {
   quantity: number;
   priceTier?: string;
 }
+
+const API_BASE_URL = 'http://119.59.102.161:3085/api';
 
 export default function CartScreen() {
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
@@ -88,7 +90,8 @@ export default function CartScreen() {
     setIsCheckoutModalOpen(true);
   };
 
-  const handleConfirmOrder = () => {
+  // ฟังก์ชันยิง API ไปยัง Backend Node.js (แบบเช็ค Error จาก Database จริงๆ)
+  const handleConfirmOrder = async () => {
     if (!fullName.trim() || !phone.trim() || !address.trim()) {
       setToastMessage('กรุณากรอกข้อมูลจัดส่งให้ครบถ้วน !');
       setTimeout(() => setToastMessage(''), 2500);
@@ -101,22 +104,53 @@ export default function CartScreen() {
       return;
     }
 
-    setIsCheckoutModalOpen(false);
-    const total = totalPrice.toLocaleString();
-    setToastMessage(`สั่งซื้อสำเร็จ! ยอดรวม ฿${total}`);
-    saveCartToStorage([]);
+    try {
+      const response = await fetch(`${API_BASE_URL}/orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: fullName.trim(),
+          phone: phone.trim(),
+          address: address.trim(),
+          paymentMethod: paymentMethod,
+          items: cartItems,
+          totalPrice: totalPrice,
+          createdAt: new Date().toISOString(),
+        }),
+      });
 
-    // รีเซ็ตฟอร์ม
-    setFullName('');
-    setPhone('');
-    setAddress('');
-    setCardNumber('');
-    setCardExpiry('');
-    setCardCvv('');
+      const data = await response.json(); // อ่านผลลัพธ์จาก Backend
 
-    setTimeout(() => {
-      setToastMessage('');
-    }, 3500);
+      if (response.ok && data.success) {
+        // ถ้ายิง API สำเร็จ และบันทึกลง Database แล้วจริงๆ
+        setIsCheckoutModalOpen(false);
+        const total = totalPrice.toLocaleString();
+        
+        setToastMessage(`สั่งซื้อสำเร็จ! จัดส่งถึงคุณ ${fullName} ยอดรวม ฿${total} ✅`);
+        saveCartToStorage([]); // ล้างตะกร้า
+
+        // รีเซ็ตฟอร์ม
+        setFullName('');
+        setPhone('');
+        setAddress('');
+        setCardNumber('');
+        setCardExpiry('');
+        setCardCvv('');
+      } else {
+        // ถ้า Backend มี Error (เช่น SQL ผิด, ต่อ Database ไม่ได้)
+        setToastMessage(`เกิดข้อผิดพลาดจากเซิร์ฟเวอร์: ${data.message || 'บันทึกไม่สำเร็จ'} ❌`);
+      }
+
+      setTimeout(() => {
+        setToastMessage('');
+      }, 3500);
+
+    } catch (err) {
+      console.log('API call error:', err);
+      // กรณี Network Error หรือเซิร์ฟเวอร์ดับ
+      setToastMessage('เซิร์ฟเวอร์ไม่ตอบสนอง กรุณาลองใหม่ ❌');
+      setTimeout(() => setToastMessage(''), 3500);
+    }
   };
 
   return (
@@ -149,7 +183,7 @@ export default function CartScreen() {
       {/* Cart Content */}
       {cartItems.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>🛒 ตะกร้าสินค้าของคุณว่างเปล่า</Text>
+          <Text style={styles.emptyText}>ตะกร้าสินค้าของคุณว่างเปล่า</Text>
           <TouchableOpacity style={styles.shopNowBtn} onPress={() => router.replace('/')}>
             <Text style={styles.shopNowText}>กลับไปหน้าหลักร้านค้า</Text>
           </TouchableOpacity>
@@ -210,7 +244,7 @@ export default function CartScreen() {
       <Modal visible={isCheckoutModalOpen} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>"ข้อมูลการจัดส่งและการชำระเงิน"</Text>
+            <Text style={styles.modalTitle}>ข้อมูลการจัดส่งและการชำระเงิน</Text>
 
             <Text style={styles.inputLabel}>ชื่อ-นามสกุล ผู้รับ</Text>
             <TextInput
@@ -280,7 +314,7 @@ export default function CartScreen() {
                   <Text style={styles.qrMatrix}>▀ █▄█ ▀ █</Text>
                   <Text style={styles.qrMatrix}>█▀█ ▀ █▀█</Text>
                 </View>
-                <Text style={styles.qrMerchant}>ร้านค้า: IEM BOII OFFICIAL</Text>
+                <Text style={styles.qrMerchant}>ร้านค้า: IEM BOII STORE</Text>
                 <Text style={styles.qrAmount}>฿{totalPrice.toLocaleString()}</Text>
               </View>
             )}
@@ -299,23 +333,27 @@ export default function CartScreen() {
                   onChangeText={setCardNumber}
                 />
                 <View style={styles.cardRow}>
-                  <TextInput
-                    style={[styles.input, styles.cardExpiryInput]}
-                    placeholder="MM/YY"
-                    placeholderTextColor="#94A3B8"
-                    maxLength={5}
-                    value={cardExpiry}
-                    onChangeText={setCardExpiry}
-                  />
-                  <TextInput
-                    style={[styles.input, styles.cardCvvInput]}
-                    placeholder="CVV"
-                    placeholderTextColor="#94A3B8"
-                    secureTextEntry
-                    maxLength={4}
-                    value={cardCvv}
-                    onChangeText={setCardCvv}
-                  />
+                  <View style={styles.cardFieldHalf}>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="MM/YY"
+                      placeholderTextColor="#94A3B8"
+                      maxLength={5}
+                      value={cardExpiry}
+                      onChangeText={setCardExpiry}
+                    />
+                  </View>
+                  <View style={styles.cardFieldHalf}>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="CVV"
+                      placeholderTextColor="#94A3B8"
+                      secureTextEntry
+                      maxLength={4}
+                      value={cardCvv}
+                      onChangeText={setCardCvv}
+                    />
+                  </View>
                 </View>
               </View>
             )}
@@ -426,8 +464,7 @@ const styles = StyleSheet.create({
   cardBox: { backgroundColor: '#F8FAFC', borderWidth: 1.5, borderColor: '#CBD5E1', borderRadius: 10, padding: 8, marginTop: 6 },
   cardBoxTitle: { fontSize: 11, fontWeight: '700', color: '#0F172A', marginBottom: 2 },
   cardRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 },
-  cardExpiryInput: { width: '58%' },
-  cardCvvInput: { width: '38%' },
+  cardFieldHalf: { flex: 1, marginHorizontal: 2 },
 
   modalTotalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, borderTopWidth: 1, borderTopColor: '#E2E8F0', paddingTop: 6 },
   modalTotalLabel: { fontSize: 12, fontWeight: '700', color: '#64748B' },
