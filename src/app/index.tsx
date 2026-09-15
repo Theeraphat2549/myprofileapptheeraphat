@@ -1,9 +1,11 @@
-import { Link, Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Image,
+  Modal,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -11,241 +13,477 @@ import {
   View,
 } from 'react-native';
 
-import LoginScreen from './login';
-import SaveModal from './save';
-
 interface Product {
   id: number;
   name: string;
   price: number;
-  stock?: number;
-  category?: string;
   image?: string;
+  priceTier?: string;
 }
 
-export default function HomeScreen() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [userRole, setUserRole] = useState<'admin' | 'user'>('user');
-  const [currentUsername, setCurrentUsername] = useState('');
+const API_BASE_URL = 'http://119.59.102.161:3085/api';
 
-  const [registeredUsers, setRegisteredUsers] = useState<{ [key: string]: string }>(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const saved = localStorage.getItem('minimal_store_users');
-      if (saved) return JSON.parse(saved);
-    }
-    return { admin: '1234' };
-  });
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.setItem('minimal_store_users', JSON.stringify(registeredUsers));
-    }
-  }, [registeredUsers]);
-
-  const [products, setProducts] = useState<Product[]>(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const savedProducts = localStorage.getItem('minimal_store_products');
-      if (savedProducts) {
-        try { return JSON.parse(savedProducts); } catch (e) { console.error(e); }
-      }
-    }
-    return [
-      { id: 1, name: 'Minimal White Sneakers', price: 2590, stock: 12, category: 'Footwear', image: 'https://images.unsplash.com/photo-1560769629-975ec94e6a86?q=80&w=400' },
-      { id: 2, name: 'Essential Cotton Tee', price: 590, stock: 10, category: 'Apparel', image: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?q=80&w=400' },
-      { id: 3, name: 'Canvas Tote Bag', price: 890, stock: 8, category: 'Accessories', image: 'https://images.unsplash.com/photo-1544816155-12df9643f363?q=80&w=400' },
-      { id: 4, name: 'Classic Leather Watch', price: 3400, stock: 5, category: 'Accessories', image: 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?q=80&w=400' },
-    ];
-  });
-
-  useEffect(() => {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      localStorage.setItem('minimal_store_products', JSON.stringify(products));
-    }
-  }, [products]);
-
-  const [loading, setLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+const clusterPricesLocally = (data: any[]) => {
+  if (!data || data.length === 0) return [];
+  const prices = data.map(item => parseFloat(item.price || 0));
   
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [nameInput, setNameInput] = useState('');
-  const [priceInput, setPriceInput] = useState('');
-  const [imageInput, setImageInput] = useState('');
+  let centroids = [
+    Math.min(...prices), 
+    (Math.min(...prices) + Math.max(...prices)) / 2, 
+    Math.max(...prices)
+  ];
+  
+  let assignments: number[] = [];
+  let changed = true;
 
-  const handleRegister = (u: string, p: string) => {
-    if (registeredUsers[u]) return false;
-    setRegisteredUsers(prev => ({ ...prev, [u]: p }));
-    return true;
-  };
+  while (changed) {
+    changed = false;
+    assignments = prices.map(price => {
+      const diffs = centroids.map(c => Math.abs(price - c));
+      return diffs.indexOf(Math.min(...diffs));
+    });
 
-  const handleResetPassword = (u: string, p: string) => {
-    setRegisteredUsers(prev => ({ ...prev, [u]: p }));
-    return true;
-  };
+    const newCentroids = [0, 1, 2].map(i => {
+      const clusterPrices = prices.filter((_, index) => assignments[index] === i);
+      return clusterPrices.length 
+        ? clusterPrices.reduce((a, b) => a + b, 0) / clusterPrices.length 
+        : centroids[i];
+    });
 
-  const filteredProducts = products.filter(item => item.name.toLowerCase().includes(searchQuery.toLowerCase()));
-
-  if (!isLoggedIn) {
-    return (
-      <>
-        <Stack.Screen options={{ headerShown: false }} />
-        <LoginScreen 
-          registeredUsers={registeredUsers}
-          onRegister={handleRegister}
-          onResetPassword={handleResetPassword}
-          onLoginSuccess={(role, name) => { setUserRole(role); setCurrentUsername(name); setIsLoggedIn(true); }} 
-        />
-      </>
-    );
+    if (JSON.stringify(centroids) !== JSON.stringify(newCentroids)) {
+      centroids = newCentroids;
+      changed = true;
+    }
   }
+
+  const sortedCentroids = [...centroids].sort((a, b) => a - b);
+  const labels = ["Low", "Mid", "High"];
+
+  return data.map((item, index) => {
+    const myCentroid = centroids[assignments[index]];
+    const tierIndex = sortedCentroids.indexOf(myCentroid);
+    return { ...item, priceTier: labels[tierIndex] || "Mid" };
+  });
+};
+
+export default function HomeScreen() {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editing, setEditing] = useState<Product | null>(null);
+  const [cartCount, setCartCount] = useState(0);
+  
+  const [name, setName] = useState('');
+  const [price, setPrice] = useState('');
+  const [image, setImage] = useState('');
+
+  const [toastMessage, setToastMessage] = useState('');
+
+  const updateCartCount = () => {
+    try {
+      if (typeof window !== 'undefined') {
+        const existingCart = localStorage.getItem('user_cart');
+        if (existingCart) {
+          const cart = JSON.parse(existingCart);
+          const totalCount = cart.reduce((sum: number, item: any) => sum + (item.quantity || 1), 0);
+          setCartCount(totalCount);
+        } else {
+          setCartCount(0);
+        }
+      }
+    } catch (e) {
+      console.log(e);
+    }
+  };
+
+  const fetchProducts = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/products`);
+      const data = await response.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const formatted = data.map((item: any) => ({
+          id: item.id || item._id || Date.now() + Math.random(),
+          name: item.name || item.title || 'Product',
+          price: Number(item.price ?? 0),
+          image: item.image || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?q=80&w=400',
+        }));
+        const clustered = clusterPricesLocally(formatted);
+        setProducts(clustered);
+      } else {
+        loadDefaults();
+      }
+    } catch (err) {
+      console.log('Fetch error:', err);
+      loadDefaults();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    try {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const role = localStorage.getItem('user_role');
+        if (!role) {
+          router.replace('/login');
+          return;
+        }
+        if (role === 'admin') {
+          setIsAdmin(true);
+        }
+      }
+    } catch (e) {
+      console.log(e);
+    }
+
+    fetchProducts();
+    updateCartCount();
+  }, []);
+
+  const loadDefaults = () => {
+    const defaults: Product[] = [
+      { id: 1, name: 'Unisex T-Shirt White', price: 390, image: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?q=80&w=400' },
+      { id: 2, name: 'Unisex T-Shirt Black', price: 390, image: 'https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?q=80&w=400' },
+      { id: 3, name: 'Unisex T-Shirt Yellow', price: 390, image: 'https://images.unsplash.com/photo-1583743814966-8936f5b7be1a?q=80&w=400' },
+    ];
+    const clustered = clusterPricesLocally(defaults);
+    setProducts(clustered);
+  };
+
+  const handleAddToCart = (product: Product) => {
+    try {
+      if (typeof window !== 'undefined') {
+        const existingCart = localStorage.getItem('user_cart');
+        let cart = existingCart ? JSON.parse(existingCart) : [];
+
+        const index = cart.findIndex((item: any) => item.id === product.id);
+        if (index > -1) {
+          cart[index].quantity += 1;
+        } else {
+          cart.push({ ...product, quantity: 1 });
+        }
+
+        localStorage.setItem('user_cart', JSON.stringify(cart));
+        updateCartCount();
+
+        setToastMessage(`เพิ่ม "${product.name}" ลงในตะกร้าแล้ว 🛒`);
+        setTimeout(() => {
+          setToastMessage('');
+        }, 2500);
+      }
+    } catch (e) {
+      console.log(e);
+    }
+  };
+
+  const handleOpen = (item?: Product) => {
+    if (!isAdmin) return;
+    setEditing(item || null);
+    setName(item ? item.name : '');
+    setPrice(item && item.price !== undefined ? item.price.toString() : '');
+    setImage(item ? item.image || '' : '');
+    setIsModalOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!isAdmin) return;
+    if (!name.trim() || !price.trim()) {
+      alert('กรุณากรอกชื่อและราคาสินค้า');
+      return;
+    }
+    
+    const pNum = parseFloat(price) || 0;
+    const imgUrl = image.trim() || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?q=80&w=400';
+
+    try {
+      if (editing) {
+        try {
+          await fetch(`${API_BASE_URL}/products/${editing.id}`, {
+            method: 'DELETE',
+          });
+        } catch (e) {
+          console.log('Delete old item notice:', e);
+        }
+      }
+
+      const response = await fetch(`${API_BASE_URL}/products`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name,
+          price: pNum,
+          stock: 10,
+          category: 'General',
+          location: '3 stores',
+          image: imgUrl
+        }),
+      });
+      
+      const result = await response.json();
+      if (!response.ok && result.success === false) {
+        alert('ไม่สามารถบันทึกข้อมูลลงฐานข้อมูลได้');
+        return;
+      }
+
+      setIsModalOpen(false);
+      setName('');
+      setPrice('');
+      setImage('');
+      setEditing(null);
+
+      setToastMessage('Update Success!');
+      setTimeout(() => setToastMessage(''), 2500);
+
+      await fetchProducts();
+    } catch (err) {
+      console.error('Save error: ', err);
+      setIsModalOpen(false);
+      await fetchProducts();
+    }
+  };
+
+  const getTierBadgeStyle = (tier?: string) => {
+    switch (tier) {
+      case 'Low':
+        return { backgroundColor: '#DCFCE7', color: '#166534', borderColor: '#BBF7D0' };
+      case 'Mid':
+        return { backgroundColor: '#DBEAFE', color: '#1E40AF', borderColor: '#BFDBFE' };
+      case 'High':
+        return { backgroundColor: '#FFEDD5', color: '#C2410C', borderColor: '#FED7AA' };
+      default:
+        return { backgroundColor: '#F1F5F9', color: '#475569', borderColor: '#E2E8F0' };
+    }
+  };
 
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
       
-      {/* Top Navbar */}
-      <View style={styles.navbar}>
-        <Text style={styles.brandTitle}>MINIMAL STORE</Text>
-        <View style={styles.navRight}>
-          <Link href="/" style={styles.navLinkActive}>Home</Link>
-          {userRole === 'admin' && (
-            <>
-              <Link href="/add" style={styles.navLink}>Add Product</Link>
-              <Link href="/dashboard" style={styles.navLink}>Dashboard</Link>
-            </>
-          )}
-          <Text style={styles.userRoleText}>{userRole === 'admin' ? 'Admin: ' : 'User: '}{currentUsername}</Text>
-          <TouchableOpacity style={styles.logoutBtn} onPress={() => setIsLoggedIn(false)}>
-            <Text style={styles.logoutText}>Logout</Text>
+      {/* Header */}
+      <View style={styles.headerWrapper}>
+        <View style={styles.header}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.brandTitle} numberOfLines={1}>IEM boii</Text>
+            <Text style={styles.brandSubtitle} numberOfLines={1}>
+              {isAdmin ? 'Admin Mode (Full Control)' : 'User Mode (Interactive Shop)'}
+            </Text>
+          </View>
+          <TouchableOpacity style={styles.logoutBtn} activeOpacity={0.8} onPress={() => {
+            if (Platform.OS === 'web' && typeof window !== 'undefined') {
+              localStorage.removeItem('user_role');
+            }
+            router.replace('/login');
+          }}>
+            <Text style={styles.logoutBtnText}>Logout</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Content */}
-      <View style={styles.contentWrapper}>
-        <View style={styles.pageHeader}>
-          <Text style={styles.pageTitle}>Product Catalog</Text>
-          <TextInput 
-            style={styles.searchInput} 
-            placeholder="Search products..." 
-            placeholderTextColor="#9CA3AF" 
-            value={searchQuery} 
-            onChangeText={setSearchQuery} 
-          />
+      {/* Toast Notification */}
+      {toastMessage !== '' && (
+        <View style={styles.toastContainer}>
+          <Text style={styles.toastText}>{toastMessage}</Text>
         </View>
+      )}
 
-        {loading ? (
-          <View style={styles.center}><ActivityIndicator size="large" color="#0F172A" /></View>
-        ) : (
-          <FlatList
-            data={filteredProducts}
-            keyExtractor={item => item.id.toString()}
-            numColumns={4}
-            contentContainerStyle={styles.gridContainer}
-            columnWrapperStyle={styles.columnWrapper}
-            renderItem={({ item }) => {
-              const stockCount = item.stock ?? 5;
-              const isLowStock = stockCount <= 3;
-              return (
-                <View style={styles.card}>
-                  <Image source={{ uri: item.image || 'https://via.placeholder.com/300' }} style={styles.cardImage} />
-                  <View style={styles.cardBody}>
-                    <Text style={styles.prodName} numberOfLines={1}>{item.name}</Text>
-                    <Text style={styles.prodCategory}>{item.category || 'General'}</Text>
-                    
-                    <View style={styles.priceRow}>
-                      <Text style={styles.priceText}>฿{item.price.toLocaleString()}</Text>
-                      <View style={[styles.badge, isLowStock ? styles.badgeLow : styles.badgeActive]}>
-                        <Text style={[styles.badgeText, isLowStock && { color: '#991B1B' }]}>
-                          {isLowStock ? 'Low Stock' : `Stock: ${stockCount}`}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {userRole === 'admin' && (
-                      <View style={styles.adminActions}>
-                        <TouchableOpacity 
-                          style={styles.editBtn} 
-                          onPress={() => { 
-                            setEditingProduct(item); 
-                            setNameInput(item.name); 
-                            setPriceInput(item.price.toString()); 
-                            setImageInput(item.image || ''); 
-                            setIsEditModalOpen(true); 
-                          }}
-                        >
-                          <Text style={styles.editText}>Edit</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity 
-                          style={styles.delBtn} 
-                          onPress={() => setProducts(prev => prev.filter(p => p.id !== item.id))}
-                        >
-                          <Text style={styles.delText}>Delete</Text>
-                        </TouchableOpacity>
+      {/* Content */}
+      {loading ? (
+        <View style={styles.loaderContainer}>
+          <ActivityIndicator size="large" color="#0F172A" />
+        </View>
+      ) : (
+        <FlatList
+          key="store-responsive-grid"
+          data={products}
+          numColumns={2}
+          keyExtractor={(item, index) => item.id?.toString() || index.toString()}
+          contentContainerStyle={styles.listContainer}
+          columnWrapperStyle={styles.columnWrapper}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item }) => {
+            const badgeStyle = getTierBadgeStyle(item.priceTier);
+            return (
+              <View style={styles.card}>
+                <View style={styles.imageContainer}>
+                  <Image source={{ uri: item.image }} style={styles.productImage} />
+                </View>
+                <View style={styles.cardContent}>
+                  <Text numberOfLines={1} style={styles.productName}>{item.name}</Text>
+                  
+                  <View style={styles.priceRow}>
+                    <Text style={styles.productPrice} numberOfLines={1}>
+                      ฿{item.price ? Number(item.price).toLocaleString() : '0'}
+                    </Text>
+                    {item.priceTier && (
+                      <View style={[styles.tierBadge, { backgroundColor: badgeStyle.backgroundColor, borderColor: badgeStyle.borderColor }]}>
+                        <Text style={[styles.tierText, { color: badgeStyle.color }]}>{item.priceTier}</Text>
                       </View>
                     )}
                   </View>
+                  
+                  {isAdmin ? (
+                    <TouchableOpacity style={styles.editBtn} activeOpacity={0.7} onPress={() => handleOpen(item)}>
+                      <Text style={styles.editText}>Edit Details</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity style={styles.addToCartBtn} activeOpacity={0.7} onPress={() => handleAddToCart(item)}>
+                      <Text style={styles.addToCartText}>🛒 Add to Cart</Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
-              );
-            }}
-          />
+              </View>
+            );
+          }}
+        />
+      )}
+
+      {/* Bottom Navigation Bar */}
+      <View style={styles.bottomNav}>
+        <TouchableOpacity style={styles.navItem} activeOpacity={0.8} onPress={() => router.push('/search')}>
+          <Text style={styles.navItemText} numberOfLines={1}>Search</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.navItem} activeOpacity={0.8} onPress={() => router.push('/cart')}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={styles.navItemText} numberOfLines={1}>🛒 Cart</Text>
+            {cartCount > 0 && (
+              <View style={styles.cartBadge}>
+                <Text style={styles.cartBadgeText}>{cartCount}</Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+
+        {isAdmin && (
+          <>
+            <TouchableOpacity style={styles.navItemPrimary} activeOpacity={0.8} onPress={() => handleOpen()}>
+              <Text style={styles.navItemPrimaryText} numberOfLines={1}>+ Add</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.navItemDanger} activeOpacity={0.8} onPress={() => router.push('/delete')}>
+              <Text style={styles.navItemDangerText} numberOfLines={1}>Delete</Text>
+            </TouchableOpacity>
+          </>
         )}
       </View>
 
-      {/* Edit Modal */}
-      <SaveModal
-        visible={isEditModalOpen}
-        nameInput={nameInput} setNameInput={setNameInput}
-        priceInput={priceInput} setPriceInput={setPriceInput}
-        imageInput={imageInput} setImageInput={setImageInput}
-        onClose={() => setIsEditModalOpen(false)}
-        onSave={() => {
-          if (!nameInput.trim()) return alert('กรุณากรอกชื่อสินค้า');
-          const cleanPrice = priceInput ? parseFloat(priceInput.toString().replace(/[^0-9.]/g, '')) : 0;
-          const priceNum = isNaN(cleanPrice) ? 0 : cleanPrice;
-          const imgUrl = imageInput.trim() || 'https://via.placeholder.com/300';
+      {/* Modal */}
+      {isAdmin && (
+        <Modal visible={isModalOpen} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>{editing ? 'Edit Product' : 'New Product'}</Text>
+              
+              <Text style={styles.inputLabel}>Product Name</Text>
+              <TextInput style={styles.input} placeholder="e.g. White Sneakers" placeholderTextColor="#94A3B8" value={name} onChangeText={setName} />
+              
+              <Text style={styles.inputLabel}>Price (THB)</Text>
+              <TextInput style={styles.input} placeholder="e.g. 1500" placeholderTextColor="#94A3B8" keyboardType="numeric" value={price} onChangeText={setPrice} />
+              
+              <Text style={styles.inputLabel}>Image URL (Optional)</Text>
+              <TextInput style={styles.input} placeholder="https://..." placeholderTextColor="#94A3B8" value={image} onChangeText={setImage} />
 
-          if (editingProduct) {
-            setProducts(prev => prev.map(p => p.id === editingProduct.id ? { ...p, name: nameInput, price: priceNum, image: imgUrl } : p));
-          }
-          setIsEditModalOpen(false);
-        }}
-      />
+              <View style={styles.modalActions}>
+                <TouchableOpacity onPress={() => setIsModalOpen(false)} style={styles.cancelBtn}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={handleSave} style={styles.saveBtn}>
+                  <Text style={styles.saveBtnText}>Save</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { backgroundColor: '#F8FAFC', paddingBottom: 60 },
-  navbar: { height: 70, backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 40 },
-  brandTitle: { fontSize: 20, fontWeight: '800', letterSpacing: 1.5, color: '#0F172A' },
-  navRight: { flexDirection: 'row', alignItems: 'center', gap: 24 },
-  navLink: { fontSize: 14, fontWeight: '500', color: '#64748B', textDecorationLine: 'none' },
-  navLinkActive: { fontSize: 14, fontWeight: '700', color: '#0F172A', textDecorationLine: 'none' },
-  userRoleText: { fontSize: 13, fontWeight: '600', color: '#334155', backgroundColor: '#F1F5F9', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 },
-  logoutBtn: { backgroundColor: '#FEE2E2', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
-  logoutText: { fontSize: 12, fontWeight: '600', color: '#DC2626' },
-  contentWrapper: { paddingHorizontal: 40, paddingTop: 32 },
-  pageHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 28 },
-  pageTitle: { fontSize: 24, fontWeight: '700', color: '#0F172A' },
-  searchInput: { width: 300, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 14, paddingVertical: 10, fontSize: 14, color: '#0F172A', outlineStyle: 'none' } as any,
-  gridContainer: { paddingBottom: 40 },
-  columnWrapper: { gap: 24, marginBottom: 24 },
-  card: { flex: 1, maxWidth: '23%', backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden' },
-  cardImage: { width: '100%', height: 200, backgroundColor: '#F1F5F9', resizeMode: 'cover' },
-  cardBody: { padding: 16 },
-  prodName: { fontSize: 15, fontWeight: '600', color: '#0F172A', marginBottom: 4 },
-  prodCategory: { fontSize: 12, color: '#64748B', marginBottom: 12 },
-  priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  priceText: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
-  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4, backgroundColor: '#F1F5F9' },
-  badgeActive: { backgroundColor: '#F1F5F9' },
-  badgeLow: { backgroundColor: '#FEE2E2' },
-  badgeText: { fontSize: 11, fontWeight: '600', color: '#475569' },
-  adminActions: { flexDirection: 'row', gap: 8, borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 12 },
-  editBtn: { flex: 1, backgroundColor: '#F1F5F9', paddingVertical: 8, borderRadius: 6, alignItems: 'center' },
-  editText: { fontSize: 12, fontWeight: '600', color: '#334155' },
-  delBtn: { flex: 1, backgroundColor: '#FEE2E2', paddingVertical: 8, borderRadius: 6, alignItems: 'center' },
-  delText: { fontSize: 12, fontWeight: '600', color: '#DC2626' },
-  center: { padding: 50, alignItems: 'center' },
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  headerWrapper: { width: '100%', backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', alignItems: 'center' },
+  header: { width: '100%', maxWidth: 800, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
+  brandTitle: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+  brandSubtitle: { fontSize: 11, color: '#64748B', marginTop: 1 },
+  logoutBtn: { backgroundColor: '#F1F5F9', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' },
+  logoutBtnText: { color: '#475569', fontSize: 12, fontWeight: '600' },
+  loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  listContainer: { padding: 12, paddingBottom: 90, width: '100%', maxWidth: 800, alignSelf: 'center' },
+  columnWrapper: { justifyContent: 'space-between', marginBottom: 12 },
+  card: { width: '48%', backgroundColor: '#FFF', borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', shadowColor: '#64748B', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
+  imageContainer: { width: '100%', height: 140, backgroundColor: '#F1F5F9' },
+  productImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  cardContent: { padding: 10 },
+  productName: { fontSize: 13, fontWeight: '700', color: '#1E293B', marginBottom: 4 },
+  
+  priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  productPrice: { fontSize: 13, fontWeight: '800', color: '#0F172A' },
+  
+  tierBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1 },
+  tierText: { fontSize: 10, fontWeight: '700' },
+
+  editBtn: { backgroundColor: '#F8FAFC', paddingVertical: 6, borderRadius: 6, alignItems: 'center', borderWidth: 1, borderColor: '#CBD5E1' },
+  editText: { fontSize: 11, fontWeight: '600', color: '#475569' },
+  
+  addToCartBtn: { backgroundColor: '#0F172A', paddingVertical: 6, borderRadius: 6, alignItems: 'center' },
+  addToCartText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
+
+  toastContainer: {
+    position: 'absolute',
+    top: 70,
+    alignSelf: 'center',
+    backgroundColor: '#0F172A',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 6,
+    zIndex: 999,
+  },
+  toastText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  bottomNav: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#FFF', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 5 },
+  navItem: { flex: 1, backgroundColor: '#F1F5F9', paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginHorizontal: 2, borderWidth: 1, borderColor: '#CBD5E1' },
+  navItemText: { color: '#0F172A', fontSize: 12, fontWeight: '700' },
+
+  cartBadge: {
+    backgroundColor: '#EF4444',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 6,
+    paddingHorizontal: 4,
+  },
+  cartBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  
+  navItemPrimary: { flex: 1, backgroundColor: '#0F172A', paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginHorizontal: 2 },
+  navItemPrimaryText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
+  
+  navItemDanger: { flex: 1, backgroundColor: '#FEF2F2', paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginHorizontal: 2, borderWidth: 1, borderColor: '#FCA5A5' },
+  navItemDangerText: { color: '#DC2626', fontSize: 12, fontWeight: '700' },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.5)', justifyContent: 'center', alignItems: 'center', padding: 16 },
+  modalCard: { width: '100%', maxWidth: 360, backgroundColor: '#FFF', borderRadius: 16, padding: 20 },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A', marginBottom: 14 },
+  inputLabel: { fontSize: 12, fontWeight: '600', color: '#475569', marginBottom: 4 },
+  input: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#CBD5E1', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13, color: '#0F172A', marginBottom: 12 },
+  modalActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, marginTop: 4 },
+  cancelBtn: { paddingHorizontal: 12, paddingVertical: 8, justifyContent: 'center' },
+  cancelBtnText: { color: '#64748B', fontSize: 12, fontWeight: '600' },
+  saveBtn: { backgroundColor: '#0F172A', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
+  saveBtnText: { color: '#FFF', fontSize: 12, fontWeight: '600' },
 });

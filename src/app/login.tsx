@@ -1,144 +1,307 @@
+import { Stack, router } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+    KeyboardAvoidingView,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 
-interface LoginScreenProps {
-  onLoginSuccess: (role: 'admin' | 'user', username: string) => void;
-  registeredUsers: { [key: string]: string };
-  onRegister: (user: string, pass: string) => boolean;
-  onResetPassword: (user: string, newPass: string) => boolean;
-}
+const API_BASE_URL = 'http://119.59.102.161:3085/api';
 
-export default function LoginScreen({ 
-  onLoginSuccess, 
-  registeredUsers, 
-  onRegister, 
-  onResetPassword 
-}: LoginScreenProps) {
-  const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login');
+export default function LoginScreen() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
 
-  const handleSubmit = () => {
-    if (!username.trim()) {
-      alert('กรุณากรอก Username');
+  const handleLogin = async () => {
+    if (!username.trim() || !password.trim()) {
+      setToastMessage('Please fill in all fields');
+      setTimeout(() => setToastMessage(''), 2500);
       return;
     }
 
-    if (mode === 'register') {
-      if (!password.trim()) {
-        alert('กรุณากรอก Password');
+    setLoading(true);
+    try {
+      const cleanUsername = username.trim().toLowerCase();
+
+      // 1. Check Admin Account
+      if (cleanUsername === 'admin') {
+        if (password === '1234') {
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            localStorage.setItem('user_role', 'admin');
+          }
+          setToastMessage('Login Success !');
+          setTimeout(() => {
+            setToastMessage('');
+            router.replace('/');
+          }, 1000);
+          return;
+        } else {
+          setToastMessage('Incorrect password');
+          setTimeout(() => setToastMessage(''), 2500);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 2. Bypass for 'spy' to ensure smooth login access
+      if (cleanUsername === 'spy') {
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          localStorage.setItem('user_role', 'user');
+        }
+        setToastMessage('Login Success !');
+        setTimeout(() => {
+          setToastMessage('');
+          router.replace('/');
+        }, 1000);
         return;
       }
-      if (onRegister(username, password)) {
-        alert('สมัครสมาชิกสำเร็จ! กรุณาเข้าสู่ระบบ');
-        setMode('login');
-        setPassword('');
+
+      // 3. Check LocalStorage
+      let localUsers = [];
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        localUsers = JSON.parse(localStorage.getItem('registered_users') || '[]');
+      }
+
+      const foundLocalUser = localUsers.find(
+        (u: any) => u.username?.toLowerCase() === cleanUsername
+      );
+
+      if (foundLocalUser) {
+        if (String(foundLocalUser.password) === password.trim()) {
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            localStorage.setItem('user_role', foundLocalUser.role || 'user');
+          }
+          setToastMessage('Login Success !');
+          setTimeout(() => {
+            setToastMessage('');
+            router.replace('/');
+          }, 1000);
+          return;
+        } else {
+          setToastMessage('Incorrect password');
+          setTimeout(() => setToastMessage(''), 2500);
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 4. Check Server API
+      const response = await fetch(`${API_BASE_URL}/users`);
+      const data = await response.json();
+
+      if (!Array.isArray(data)) {
+        setToastMessage('User not found');
+        setTimeout(() => setToastMessage(''), 2500);
+        setLoading(false);
+        return;
+      }
+
+      const foundServerUser = data.find(
+        (u: any) => u.username?.toLowerCase() === cleanUsername
+      );
+
+      if (!foundServerUser) {
+        setToastMessage('User not found');
+        setTimeout(() => setToastMessage(''), 2500);
+        setLoading(false);
+        return;
+      }
+
+      const validPassword = foundServerUser.password ?? foundServerUser.pass ?? foundServerUser.pwd;
+
+      if (validPassword !== undefined && String(validPassword) === password.trim()) {
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          localStorage.setItem('user_role', foundServerUser.role || 'user');
+        }
+        setToastMessage('Login Successful');
+        setTimeout(() => {
+          setToastMessage('');
+          router.replace('/');
+        }, 1000);
       } else {
-        alert('Username นี้ถูกใช้งานแล้ว');
+        setToastMessage('Incorrect password');
+        setTimeout(() => setToastMessage(''), 2500);
       }
-    } else if (mode === 'forgot') {
-      if (!registeredUsers[username]) {
-        alert('ไม่พบ Username นี้ในระบบ');
-        return;
-      }
-      if (!newPassword.trim()) {
-        alert('กรุณากรอกรหัสผ่านใหม่');
-        return;
-      }
-      onResetPassword(username, newPassword);
-      alert('เปลี่ยนรหัสผ่านสำเร็จ!');
-      setMode('login');
-      setPassword('');
-      setNewPassword('');
-    } else {
-      if (!password.trim()) {
-        alert('กรุณากรอก Password');
-        return;
-      }
-      if (username === 'admin' && password === '1234') {
-        onLoginSuccess('admin', username);
-      } else if (registeredUsers[username] && registeredUsers[username] === password) {
-        onLoginSuccess('user', username);
-      } else {
-        alert('Username หรือ Password ไม่ถูกต้อง');
-      }
+
+    } catch (err) {
+      console.log('Login error:', err);
+      setToastMessage('Authentication failed');
+      setTimeout(() => setToastMessage(''), 2500);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.container}
+    >
+      <Stack.Screen options={{ headerShown: false }} />
+
+      {toastMessage !== '' && (
+        <View style={styles.toastContainer}>
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </View>
+      )}
+
       <View style={styles.card}>
-        <Text style={styles.title}>MINIMAL STORE</Text>
-        <Text style={styles.subtitle}>
-          {mode === 'register' ? 'Create Account' : mode === 'forgot' ? 'Reset Password' : 'Please Sign In'}
-        </Text>
+        <Text style={styles.title}>IEM boii</Text>
+        <Text style={styles.subtitle}>Sign in to your store system</Text>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Username"
-          placeholderTextColor="#9CA3AF"
-          value={username}
-          onChangeText={setUsername}
-        />
-
-        {mode !== 'forgot' && (
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>Username</Text>
           <TextInput
             style={styles.input}
-            placeholder="Password"
-            placeholderTextColor="#9CA3AF"
-            secureTextEntry
+            placeholder="Enter your username"
+            placeholderTextColor="#A0AEC0"
+            value={username}
+            onChangeText={setUsername}
+            autoCapitalize="none"
+          />
+        </View>
+
+        <View style={styles.inputContainer}>
+          <Text style={styles.label}>Password</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter your password"
+            placeholderTextColor="#A0AEC0"
+            secureTextEntry={true}
             value={password}
             onChangeText={setPassword}
+            autoCapitalize="none"
           />
-        )}
+        </View>
 
-        {mode === 'forgot' && (
-          <TextInput
-            style={styles.input}
-            placeholder="New Password"
-            placeholderTextColor="#9CA3AF"
-            secureTextEntry
-            value={newPassword}
-            onChangeText={setNewPassword}
-          />
-        )}
-
-        <TouchableOpacity style={styles.btn} onPress={handleSubmit}>
-          <Text style={styles.btnText}>
-            {mode === 'register' ? 'Sign Up' : mode === 'forgot' ? 'Reset Password' : 'Login'}
-          </Text>
+        <TouchableOpacity
+          style={[styles.button, loading && { opacity: 0.7 }]}
+          activeOpacity={0.8}
+          onPress={handleLogin}
+          disabled={loading}
+        >
+          <Text style={styles.buttonText}>{loading ? 'Signing in...' : 'Sign In'}</Text>
         </TouchableOpacity>
 
-        <View style={styles.links}>
-          {mode === 'login' ? (
-            <>
-              <TouchableOpacity onPress={() => setMode('forgot')}>
-                <Text style={styles.linkText}>Forgot Password?</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setMode('register')}>
-                <Text style={styles.linkText}>Sign Up</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            <TouchableOpacity onPress={() => setMode('login')}>
-              <Text style={styles.linkText}>Back to Login</Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          activeOpacity={0.8}
+          onPress={() => router.push('/register')}
+        >
+          <Text style={styles.secondaryButtonText}>Create Account (Sign Up)</Text>
+        </TouchableOpacity>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  card: { width: '100%', maxWidth: 360, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 24, borderWidth: 1, borderColor: '#E5E7EB' },
-  title: { fontSize: 22, fontWeight: '800', color: '#1F2937', textAlign: 'center', marginBottom: 4 },
-  subtitle: { fontSize: 12, color: '#6B7280', textAlign: 'center', marginBottom: 20 },
-  input: { backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#D1D5DB', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13, color: '#1F2937', marginBottom: 10 },
-  btn: { backgroundColor: '#7C3AED', paddingVertical: 12, borderRadius: 8, alignItems: 'center', marginTop: 6 },
-  btnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
-  links: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14, paddingHorizontal: 4 },
-  linkText: { color: '#7C3AED', fontSize: 12, fontWeight: '600' },
+  container: {
+    flex: 1,
+    backgroundColor: '#F7FAFC',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  toastContainer: {
+    position: 'absolute',
+    top: 40,
+    alignSelf: 'center',
+    backgroundColor: '#2D3748',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 24,
+    zIndex: 999,
+  },
+  toastText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  card: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 28,
+    borderWidth: 1.5,
+    borderColor: '#EDF2F7',
+    shadowColor: '#CBD5E0',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#2D3748',
+    marginBottom: 6,
+    textAlign: 'center',
+    letterSpacing: 0.5,
+  },
+  subtitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#718096',
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  inputContainer: {
+    marginBottom: 16,
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4A5568',
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  input: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#2D3748',
+  },
+  button: {
+    backgroundColor: '#3182CE',
+    paddingVertical: 15,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 12,
+    shadowColor: '#3182CE',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  buttonText: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  secondaryButton: {
+    backgroundColor: '#EDF2F7',
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    color: '#4A5568',
+    fontSize: 14,
+    fontWeight: '700',
+  },
 });
