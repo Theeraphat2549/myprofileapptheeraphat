@@ -346,7 +346,7 @@ export default function HomeScreen() {
         />
       )}
 
-      {/* Bottom Navigation Bar (เพิ่มปุ่ม QR Pay ตรงนี้) */}
+      {/* Bottom Navigation Bar */}
       <View style={styles.bottomNav}>
         <TouchableOpacity style={styles.navItem} activeOpacity={0.8} onPress={() => router.push('/search')}>
           <Text style={styles.navItemText} numberOfLines={1}>Search</Text>
@@ -363,10 +363,17 @@ export default function HomeScreen() {
           </View>
         </TouchableOpacity>
 
-        {/* 📌 ปุ่มทางลัดไปหน้า QR Code Payment */}
+        {/* ปุ่มไปหน้า QR Pay */}
         <TouchableOpacity style={[styles.navItem, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]} activeOpacity={0.8} onPress={() => router.push('/payment')}>
           <Text style={[styles.navItemText, { color: '#047857' }]} numberOfLines={1}>QR Pay</Text>
         </TouchableOpacity>
+
+        {/* 📌 ปุ่ม Dashboard (แสดงเฉพาะ Admin เท่านั้น) */}
+        {isAdmin && (
+          <TouchableOpacity style={[styles.navItem, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]} activeOpacity={0.8} onPress={() => router.push('/dashboard')}>
+            <Text style={[styles.navItemText, { color: '#1D4ED8' }]} numberOfLines={1}>📊 Dashboard</Text>
+          </TouchableOpacity>
+        )}
 
         {isAdmin && (
           <>
