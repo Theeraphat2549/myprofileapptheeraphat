@@ -55,7 +55,7 @@ export default function RegisterScreen() {
         console.log('API notice:', e);
       }
 
-      setToastMessage('Registration Successful');
+      setToastMessage('Registration Success');
       setTimeout(() => {
         setToastMessage('');
         router.replace('/login');
@@ -63,7 +63,7 @@ export default function RegisterScreen() {
 
     } catch (err) {
       console.log('Register error:', err);
-      setToastMessage('Registration Successful');
+      setToastMessage('Registration Success');
       setTimeout(() => {
         setToastMessage('');
         router.replace('/login');

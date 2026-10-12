@@ -157,9 +157,17 @@ export default function HomeScreen() {
         const existingCart = localStorage.getItem('user_cart');
         let cart = existingCart ? JSON.parse(existingCart) : [];
 
-        const index = cart.findIndex((item: any) => item.id === product.id);
+        const index = cart.findIndex((item: any) => item.name?.trim().toLowerCase() === product.name?.trim().toLowerCase());
+        
         if (index > -1) {
-          cart[index].quantity += 1;
+          cart[index] = {
+            ...cart[index],
+            id: product.id,
+            name: product.name,
+            price: product.price,
+            image: product.image,
+            quantity: (cart[index].quantity || 1) + 1
+          };
         } else {
           cart.push({ ...product, quantity: 1 });
         }
@@ -338,7 +346,7 @@ export default function HomeScreen() {
         />
       )}
 
-      {/* Bottom Navigation Bar */}
+      {/* Bottom Navigation Bar (เพิ่มปุ่ม QR Pay ตรงนี้) */}
       <View style={styles.bottomNav}>
         <TouchableOpacity style={styles.navItem} activeOpacity={0.8} onPress={() => router.push('/search')}>
           <Text style={styles.navItemText} numberOfLines={1}>Search</Text>
@@ -353,6 +361,11 @@ export default function HomeScreen() {
               </View>
             )}
           </View>
+        </TouchableOpacity>
+
+        {/* 📌 ปุ่มทางลัดไปหน้า QR Code Payment */}
+        <TouchableOpacity style={[styles.navItem, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]} activeOpacity={0.8} onPress={() => router.push('/payment')}>
+          <Text style={[styles.navItemText, { color: '#047857' }]} numberOfLines={1}>QR Pay</Text>
         </TouchableOpacity>
 
         {isAdmin && (
