@@ -12,7 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-
+ 
 interface Product {
   id: number;
   name: string;
@@ -20,52 +20,52 @@ interface Product {
   image?: string;
   priceTier?: string;
 }
-
+ 
 const API_BASE_URL = 'http://119.59.102.161:3085/api';
-
+ 
 const clusterPricesLocally = (data: any[]) => {
   if (!data || data.length === 0) return [];
   const prices = data.map(item => parseFloat(item.price || 0));
-  
+ 
   let centroids = [
-    Math.min(...prices), 
-    (Math.min(...prices) + Math.max(...prices)) / 2, 
+    Math.min(...prices),
+    (Math.min(...prices) + Math.max(...prices)) / 2,
     Math.max(...prices)
   ];
-  
+ 
   let assignments: number[] = [];
   let changed = true;
-
+ 
   while (changed) {
     changed = false;
     assignments = prices.map(price => {
       const diffs = centroids.map(c => Math.abs(price - c));
       return diffs.indexOf(Math.min(...diffs));
     });
-
+ 
     const newCentroids = [0, 1, 2].map(i => {
       const clusterPrices = prices.filter((_, index) => assignments[index] === i);
-      return clusterPrices.length 
-        ? clusterPrices.reduce((a, b) => a + b, 0) / clusterPrices.length 
+      return clusterPrices.length
+        ? clusterPrices.reduce((a, b) => a + b, 0) / clusterPrices.length
         : centroids[i];
     });
-
+ 
     if (JSON.stringify(centroids) !== JSON.stringify(newCentroids)) {
       centroids = newCentroids;
       changed = true;
     }
   }
-
+ 
   const sortedCentroids = [...centroids].sort((a, b) => a - b);
   const labels = ["Low", "Mid", "High"];
-
+ 
   return data.map((item, index) => {
     const myCentroid = centroids[assignments[index]];
     const tierIndex = sortedCentroids.indexOf(myCentroid);
     return { ...item, priceTier: labels[tierIndex] || "Mid" };
   });
 };
-
+ 
 export default function HomeScreen() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,13 +73,13 @@ export default function HomeScreen() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [cartCount, setCartCount] = useState(0);
-  
+ 
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [image, setImage] = useState('');
-
+ 
   const [toastMessage, setToastMessage] = useState('');
-
+ 
   const updateCartCount = () => {
     try {
       if (typeof window !== 'undefined') {
@@ -96,7 +96,7 @@ export default function HomeScreen() {
       console.log(e);
     }
   };
-
+ 
   const fetchProducts = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/products`);
@@ -120,7 +120,7 @@ export default function HomeScreen() {
       setLoading(false);
     }
   };
-
+ 
   useEffect(() => {
     try {
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -136,11 +136,11 @@ export default function HomeScreen() {
     } catch (e) {
       console.log(e);
     }
-
+ 
     fetchProducts();
     updateCartCount();
   }, []);
-
+ 
   const loadDefaults = () => {
     const defaults: Product[] = [
       { id: 1, name: 'Unisex T-Shirt White', price: 390, image: 'https://images.unsplash.com/photo-1521572267360-ee0c2909d518?q=80&w=400' },
@@ -150,24 +150,16 @@ export default function HomeScreen() {
     const clustered = clusterPricesLocally(defaults);
     setProducts(clustered);
   };
-
- const handleAddToCart = (product: Product) => {
+ 
+  const handleAddToCart = (product: Product) => {
     try {
       if (typeof window !== 'undefined') {
         const existingCart = localStorage.getItem('user_cart');
         let cart = existingCart ? JSON.parse(existingCart) : [];
-
-<<<<<<< HEAD
+ 
         const index = cart.findIndex((item: any) => item.name?.trim().toLowerCase() === product.name?.trim().toLowerCase());
-        
+       
         if (index > -1) {
-=======
-        // เปลี่ยนมาเช็คจากชื่อสินค้า (name) แทน id เพื่อป้องกันปัญหาตอน id ในฐานข้อมูลเปลี่ยน
-        const index = cart.findIndex((item: any) => item.name?.trim().toLowerCase() === product.name?.trim().toLowerCase());
-        
-        if (index > -1) {
-          // อัปเดตข้อมูลล่าสุด ทั้ง id ใหม่, ชื่อ, ราคา และรูปภาพใหม่ ทับลงไปทันที
->>>>>>> ac74120477d995f9aa5f601ea3f4d61fd7456808
           cart[index] = {
             ...cart[index],
             id: product.id,
@@ -179,10 +171,10 @@ export default function HomeScreen() {
         } else {
           cart.push({ ...product, quantity: 1 });
         }
-
+ 
         localStorage.setItem('user_cart', JSON.stringify(cart));
         updateCartCount();
-
+ 
         setToastMessage(`เพิ่ม "${product.name}" ลงในตะกร้าแล้ว 🛒`);
         setTimeout(() => {
           setToastMessage('');
@@ -192,7 +184,7 @@ export default function HomeScreen() {
       console.log(e);
     }
   };
-
+ 
   const handleOpen = (item?: Product) => {
     if (!isAdmin) return;
     setEditing(item || null);
@@ -201,17 +193,17 @@ export default function HomeScreen() {
     setImage(item ? item.image || '' : '');
     setIsModalOpen(true);
   };
-
+ 
   const handleSave = async () => {
     if (!isAdmin) return;
     if (!name.trim() || !price.trim()) {
       alert('กรุณากรอกชื่อและราคาสินค้า');
       return;
     }
-    
+   
     const pNum = parseFloat(price) || 0;
     const imgUrl = image.trim() || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?q=80&w=400';
-
+ 
     try {
       if (editing) {
         try {
@@ -222,7 +214,7 @@ export default function HomeScreen() {
           console.log('Delete old item notice:', e);
         }
       }
-
+ 
       const response = await fetch(`${API_BASE_URL}/products`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -235,22 +227,22 @@ export default function HomeScreen() {
           image: imgUrl
         }),
       });
-      
+     
       const result = await response.json();
       if (!response.ok && result.success === false) {
         alert('ไม่สามารถบันทึกข้อมูลลงฐานข้อมูลได้');
         return;
       }
-
+ 
       setIsModalOpen(false);
       setName('');
       setPrice('');
       setImage('');
       setEditing(null);
-
+ 
       setToastMessage('Update Success!');
       setTimeout(() => setToastMessage(''), 2500);
-
+ 
       await fetchProducts();
     } catch (err) {
       console.error('Save error: ', err);
@@ -258,7 +250,7 @@ export default function HomeScreen() {
       await fetchProducts();
     }
   };
-
+ 
   const getTierBadgeStyle = (tier?: string) => {
     switch (tier) {
       case 'Low':
@@ -271,11 +263,11 @@ export default function HomeScreen() {
         return { backgroundColor: '#F1F5F9', color: '#475569', borderColor: '#E2E8F0' };
     }
   };
-
+ 
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      
+     
       {/* Header */}
       <View style={styles.headerWrapper}>
         <View style={styles.header}>
@@ -295,14 +287,14 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
       </View>
-
+ 
       {/* Toast Notification */}
       {toastMessage !== '' && (
         <View style={styles.toastContainer}>
           <Text style={styles.toastText}>{toastMessage}</Text>
         </View>
       )}
-
+ 
       {/* Content */}
       {loading ? (
         <View style={styles.loaderContainer}>
@@ -326,7 +318,7 @@ export default function HomeScreen() {
                 </View>
                 <View style={styles.cardContent}>
                   <Text numberOfLines={1} style={styles.productName}>{item.name}</Text>
-                  
+                 
                   <View style={styles.priceRow}>
                     <Text style={styles.productPrice} numberOfLines={1}>
                       ฿{item.price ? Number(item.price).toLocaleString() : '0'}
@@ -337,7 +329,7 @@ export default function HomeScreen() {
                       </View>
                     )}
                   </View>
-                  
+                 
                   {isAdmin ? (
                     <TouchableOpacity style={styles.editBtn} activeOpacity={0.7} onPress={() => handleOpen(item)}>
                       <Text style={styles.editText}>Edit Details</Text>
@@ -353,13 +345,13 @@ export default function HomeScreen() {
           }}
         />
       )}
-
+ 
       {/* Bottom Navigation Bar */}
       <View style={styles.bottomNav}>
         <TouchableOpacity style={styles.navItem} activeOpacity={0.8} onPress={() => router.push('/search')}>
           <Text style={styles.navItemText} numberOfLines={1}>Search</Text>
         </TouchableOpacity>
-
+ 
         <TouchableOpacity style={styles.navItem} activeOpacity={0.8} onPress={() => router.push('/cart')}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }}>
             <Text style={styles.navItemText} numberOfLines={1}>🛒 Cart</Text>
@@ -370,48 +362,48 @@ export default function HomeScreen() {
             )}
           </View>
         </TouchableOpacity>
-
+ 
         {/* ปุ่มไปหน้า QR Pay */}
         <TouchableOpacity style={[styles.navItem, { backgroundColor: '#ECFDF5', borderColor: '#A7F3D0' }]} activeOpacity={0.8} onPress={() => router.push('/payment')}>
           <Text style={[styles.navItemText, { color: '#047857' }]} numberOfLines={1}>QR Pay</Text>
         </TouchableOpacity>
-
+ 
         {/* 📌 ปุ่ม Dashboard (แสดงเฉพาะ Admin เท่านั้น) */}
         {isAdmin && (
           <TouchableOpacity style={[styles.navItem, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]} activeOpacity={0.8} onPress={() => router.push('/dashboard')}>
             <Text style={[styles.navItemText, { color: '#1D4ED8' }]} numberOfLines={1}>📊 Dashboard</Text>
           </TouchableOpacity>
         )}
-
+ 
         {isAdmin && (
           <>
             <TouchableOpacity style={styles.navItemPrimary} activeOpacity={0.8} onPress={() => handleOpen()}>
               <Text style={styles.navItemPrimaryText} numberOfLines={1}>+ Add</Text>
             </TouchableOpacity>
-
+ 
             <TouchableOpacity style={styles.navItemDanger} activeOpacity={0.8} onPress={() => router.push('/delete')}>
               <Text style={styles.navItemDangerText} numberOfLines={1}>Delete</Text>
             </TouchableOpacity>
           </>
         )}
       </View>
-
+ 
       {/* Modal */}
       {isAdmin && (
         <Modal visible={isModalOpen} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>{editing ? 'Edit Product' : 'New Product'}</Text>
-              
+             
               <Text style={styles.inputLabel}>Product Name</Text>
               <TextInput style={styles.input} placeholder="e.g. White Sneakers" placeholderTextColor="#94A3B8" value={name} onChangeText={setName} />
-              
+             
               <Text style={styles.inputLabel}>Price (THB)</Text>
               <TextInput style={styles.input} placeholder="e.g. 1500" placeholderTextColor="#94A3B8" keyboardType="numeric" value={price} onChangeText={setPrice} />
-              
+             
               <Text style={styles.inputLabel}>Image URL (Optional)</Text>
               <TextInput style={styles.input} placeholder="https://..." placeholderTextColor="#94A3B8" value={image} onChangeText={setImage} />
-
+ 
               <View style={styles.modalActions}>
                 <TouchableOpacity onPress={() => setIsModalOpen(false)} style={styles.cancelBtn}>
                   <Text style={styles.cancelBtnText}>Cancel</Text>
@@ -427,7 +419,7 @@ export default function HomeScreen() {
     </View>
   );
 }
-
+ 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   headerWrapper: { width: '100%', backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', alignItems: 'center' },
@@ -444,19 +436,19 @@ const styles = StyleSheet.create({
   productImage: { width: '100%', height: '100%', resizeMode: 'cover' },
   cardContent: { padding: 10 },
   productName: { fontSize: 13, fontWeight: '700', color: '#1E293B', marginBottom: 4 },
-  
+ 
   priceRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   productPrice: { fontSize: 13, fontWeight: '800', color: '#0F172A' },
-  
+ 
   tierBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1 },
   tierText: { fontSize: 10, fontWeight: '700' },
-
+ 
   editBtn: { backgroundColor: '#F8FAFC', paddingVertical: 6, borderRadius: 6, alignItems: 'center', borderWidth: 1, borderColor: '#CBD5E1' },
   editText: { fontSize: 11, fontWeight: '600', color: '#475569' },
-  
+ 
   addToCartBtn: { backgroundColor: '#0F172A', paddingVertical: 6, borderRadius: 6, alignItems: 'center' },
   addToCartText: { fontSize: 11, fontWeight: '700', color: '#FFFFFF' },
-
+ 
   toastContainer: {
     position: 'absolute',
     top: 70,
@@ -477,11 +469,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-
+ 
   bottomNav: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: '#FFF', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 5 },
   navItem: { flex: 1, backgroundColor: '#F1F5F9', paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginHorizontal: 2, borderWidth: 1, borderColor: '#CBD5E1' },
   navItemText: { color: '#0F172A', fontSize: 12, fontWeight: '700' },
-
+ 
   cartBadge: {
     backgroundColor: '#EF4444',
     borderRadius: 10,
@@ -497,13 +489,13 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
   },
-  
+ 
   navItemPrimary: { flex: 1, backgroundColor: '#0F172A', paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginHorizontal: 2 },
   navItemPrimaryText: { color: '#FFF', fontSize: 12, fontWeight: '700' },
-  
+ 
   navItemDanger: { flex: 1, backgroundColor: '#FEF2F2', paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginHorizontal: 2, borderWidth: 1, borderColor: '#FCA5A5' },
   navItemDangerText: { color: '#DC2626', fontSize: 12, fontWeight: '700' },
-
+ 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.5)', justifyContent: 'center', alignItems: 'center', padding: 16 },
   modalCard: { width: '100%', maxWidth: 360, backgroundColor: '#FFF', borderRadius: 16, padding: 20 },
   modalTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A', marginBottom: 14 },
