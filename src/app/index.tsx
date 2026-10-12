@@ -151,15 +151,23 @@ export default function HomeScreen() {
     setProducts(clustered);
   };
 
-  const handleAddToCart = (product: Product) => {
+ const handleAddToCart = (product: Product) => {
     try {
       if (typeof window !== 'undefined') {
         const existingCart = localStorage.getItem('user_cart');
         let cart = existingCart ? JSON.parse(existingCart) : [];
 
+<<<<<<< HEAD
         const index = cart.findIndex((item: any) => item.name?.trim().toLowerCase() === product.name?.trim().toLowerCase());
         
         if (index > -1) {
+=======
+        // เปลี่ยนมาเช็คจากชื่อสินค้า (name) แทน id เพื่อป้องกันปัญหาตอน id ในฐานข้อมูลเปลี่ยน
+        const index = cart.findIndex((item: any) => item.name?.trim().toLowerCase() === product.name?.trim().toLowerCase());
+        
+        if (index > -1) {
+          // อัปเดตข้อมูลล่าสุด ทั้ง id ใหม่, ชื่อ, ราคา และรูปภาพใหม่ ทับลงไปทันที
+>>>>>>> ac74120477d995f9aa5f601ea3f4d61fd7456808
           cart[index] = {
             ...cart[index],
             id: product.id,
